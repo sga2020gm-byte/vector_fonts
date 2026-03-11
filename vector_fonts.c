@@ -9,6 +9,134 @@
 #include "epaper.h"
 #include "main.h"
 
+#define VF_BEZIER_STEPS 16U
+#define VF_KAPPA_NUM 552U
+#define VF_KAPPA_DEN 1000U
+
+typedef struct {
+	int32_t x;
+	int32_t y;
+} vf_point_t;
+
+static void vf_drawBezierCubic(uint16_t color, uint16_t lineWidth,
+		vf_point_t p0, vf_point_t p1, vf_point_t p2, vf_point_t p3) {
+	uint32_t i;
+	vf_point_t prev = p0;
+
+	for (i = 1; i <= VF_BEZIER_STEPS; ++i) {
+		const int32_t t = (int32_t) ((i * 1024U) / VF_BEZIER_STEPS);
+		const int32_t u = 1024 - t;
+		const int64_t b0 = (int64_t) u * u * u;
+		const int64_t b1 = 3LL * u * u * t;
+		const int64_t b2 = 3LL * u * t * t;
+		const int64_t b3 = (int64_t) t * t * t;
+		vf_point_t cur;
+
+		cur.x = (int32_t) ((b0 * p0.x + b1 * p1.x + b2 * p2.x + b3 * p3.x) / (1024LL * 1024LL * 1024LL));
+		cur.y = (int32_t) ((b0 * p0.y + b1 * p1.y + b2 * p2.y + b3 * p3.y) / (1024LL * 1024LL * 1024LL));
+
+		epd_paint_drawLine((uint16_t) prev.x, (uint16_t) prev.y,
+				(uint16_t) cur.x, (uint16_t) cur.y, color, lineWidth);
+		prev = cur;
+	}
+}
+
+static void vf_drawArcQuarter(uint16_t cx, uint16_t cy, uint16_t rx, uint16_t ry,
+		uint8_t quarter, uint16_t color, uint16_t lineWidth) {
+	const int32_t kx = ((int32_t) rx * VF_KAPPA_NUM) / VF_KAPPA_DEN;
+	const int32_t ky = ((int32_t) ry * VF_KAPPA_NUM) / VF_KAPPA_DEN;
+	vf_point_t p0;
+	vf_point_t p1;
+	vf_point_t p2;
+	vf_point_t p3;
+
+	switch (quarter & 3U) {
+	case 0: /* top -> right */
+		p0 = (vf_point_t ) { cx, cy - (int32_t) ry };
+		p1 = (vf_point_t ) { cx + kx, cy - (int32_t) ry };
+		p2 = (vf_point_t ) { cx + (int32_t) rx, cy - ky };
+		p3 = (vf_point_t ) { cx + (int32_t) rx, cy };
+		break;
+	case 1: /* right -> bottom */
+		p0 = (vf_point_t ) { cx + (int32_t) rx, cy };
+		p1 = (vf_point_t ) { cx + (int32_t) rx, cy + ky };
+		p2 = (vf_point_t ) { cx + kx, cy + (int32_t) ry };
+		p3 = (vf_point_t ) { cx, cy + (int32_t) ry };
+		break;
+	case 2: /* bottom -> left */
+		p0 = (vf_point_t ) { cx, cy + (int32_t) ry };
+		p1 = (vf_point_t ) { cx - kx, cy + (int32_t) ry };
+		p2 = (vf_point_t ) { cx - (int32_t) rx, cy + ky };
+		p3 = (vf_point_t ) { cx - (int32_t) rx, cy };
+		break;
+	default: /* left -> top */
+		p0 = (vf_point_t ) { cx - (int32_t) rx, cy };
+		p1 = (vf_point_t ) { cx - (int32_t) rx, cy - ky };
+		p2 = (vf_point_t ) { cx - kx, cy - (int32_t) ry };
+		p3 = (vf_point_t ) { cx, cy - (int32_t) ry };
+		break;
+	}
+
+	vf_drawBezierCubic(color, lineWidth, p0, p1, p2, p3);
+}
+
+static void vf_drawLineBezier(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1,
+		uint16_t color, uint16_t lineWidth) {
+	vf_point_t p0 = { x0, y0 };
+	vf_point_t p1 = { (2 * (int32_t) x0 + (int32_t) x1) / 3, (2 * (int32_t) y0 + (int32_t) y1) / 3 };
+	vf_point_t p2 = { ((int32_t) x0 + 2 * (int32_t) x1) / 3, ((int32_t) y0 + 2 * (int32_t) y1) / 3 };
+	vf_point_t p3 = { x1, y1 };
+
+	vf_drawBezierCubic(color, lineWidth, p0, p1, p2, p3);
+}
+
+static void vf_drawSemiEllipseBezier(uint16_t cx, uint16_t cy, uint16_t rx, uint16_t ry,
+		uint16_t color, uint8_t startSegment, uint8_t endSegment, uint16_t lineWidth) {
+	if (startSegment == 0U && endSegment == 4U) {
+		vf_drawArcQuarter(cx, cy, rx, ry, 0, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 1, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 2, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 3, color, lineWidth);
+		return;
+	}
+
+	if (startSegment == 0U && endSegment == 3U) {
+		/* Правая половина */
+		vf_drawArcQuarter(cx, cy, rx, ry, 0, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 1, color, lineWidth);
+		return;
+	}
+
+	if (startSegment == 0U && endSegment == 2U) {
+		/* Левая половина */
+		vf_drawArcQuarter(cx, cy, rx, ry, 2, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 3, color, lineWidth);
+		return;
+	}
+
+	if (startSegment == 0U && endSegment == 1U) {
+		/* Нижняя половина */
+		vf_drawArcQuarter(cx, cy, rx, ry, 1, color, lineWidth);
+		vf_drawArcQuarter(cx, cy, rx, ry, 2, color, lineWidth);
+		return;
+	}
+
+	if (startSegment == 1U && endSegment == 3U) {
+		/* Нижняя точка как короткая дуга для пунктуации */
+		vf_drawArcQuarter(cx, cy, rx, ry, 1, color, lineWidth);
+		return;
+	}
+}
+
+static void vf_drawSemiCircleBezier(uint16_t cx, uint16_t cy, uint16_t radius,
+		uint16_t color, uint8_t startSegment, uint8_t endSegment, uint16_t lineWidth) {
+	vf_drawSemiEllipseBezier(cx, cy, radius, radius, color, startSegment, endSegment, lineWidth);
+}
+
+#define epd_paint_drawLine vf_drawLineBezier
+#define epd_paint_drawSemiEllipse vf_drawSemiEllipseBezier
+#define epd_paint_drawSemiCircle vf_drawSemiCircleBezier
+
 
 void vector_A(uint16_t x, uint16_t y, uint16_t size1, uint16_t color,uint16_t LineWidth){
 	uint16_t width = size1 / 2;  // Ширина буквы A (половина высоты)
@@ -460,11 +588,11 @@ void vector_9(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t L
 void vector_point(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth){
 	epd_paint_drawSemiCircle(x+size1/2, y + size1, 3, color, 1, 3, LineWidth);
 }
-void vector_minus(x,y,size1,color,LineWidth){
+void vector_minus(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth){
 	uint16_t width = size1 / 2;
 	epd_paint_drawLine(x, y + size1/2, x+width, y + size1/2, color, LineWidth);
 }
-void vector_plus(x,y,size1,color,LineWidth){
+void vector_plus(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth){
 	uint16_t width = size1 / 2;
 	epd_paint_drawLine(x, y + size1/2, x+width, y + size1/2, color, LineWidth);
 	epd_paint_drawLine(x+width/2, y+size1/4, x+width/2, y + size1*0.75, color, LineWidth);
@@ -473,7 +601,7 @@ void vector_plus(x,y,size1,color,LineWidth){
 void epd_paint_showChar_vector(uint16_t x, uint16_t y, uint16_t chr, uint16_t size1, uint16_t color){
 	uint16_t LineWidth;
 	LineWidth = size1/10;
-	if (chr !="" && chr !='.'){
+	if (chr !=' ' && chr !='.'){
 		epd_paint_drawRectangle(x-1, y-1, x+size1*0.75+1, y+size1+2, EPD_COLOR_WHITE, 1);
 	}
 	if (LineWidth == 0) LineWidth = 1;
@@ -585,6 +713,84 @@ void epd_paint_showChar_vector(uint16_t x, uint16_t y, uint16_t chr, uint16_t si
 		break;
 	case '9':
 		vector_9(x,y,size1,color,LineWidth);
+		break;
+	case 'a':
+		vector_A(x,y,size1,color,LineWidth);
+		break;
+	case 'b':
+		vector_B(x,y,size1,color,LineWidth);
+		break;
+	case 'c':
+		vector_C(x,y,size1,color,LineWidth);
+		break;
+	case 'd':
+		vector_D(x,y,size1,color,LineWidth);
+		break;
+	case 'e':
+		vector_E(x,y,size1,color,LineWidth);
+		break;
+	case 'f':
+		vector_F(x,y,size1,color,LineWidth);
+		break;
+	case 'g':
+		vector_G(x,y,size1,color,LineWidth);
+		break;
+	case 'h':
+		vector_H(x,y,size1,color,LineWidth);
+		break;
+	case 'i':
+		vector_I(x,y,size1,color,LineWidth);
+		break;
+	case 'j':
+		vector_J(x,y,size1,color,LineWidth);
+		break;
+	case 'k':
+		vector_K(x,y,size1,color,LineWidth);
+		break;
+	case 'l':
+		vector_L(x,y,size1,color,LineWidth);
+		break;
+	case 'm':
+		vector_M(x,y,size1,color,LineWidth);
+		break;
+	case 'n':
+		vector_N(x,y,size1,color,LineWidth);
+		break;
+	case 'o':
+		vector_O(x,y,size1,color,LineWidth);
+		break;
+	case 'p':
+		vector_P(x,y,size1,color,LineWidth);
+		break;
+	case 'q':
+		vector_Q(x,y,size1,color,LineWidth);
+		break;
+	case 'r':
+		vector_R(x,y,size1,color,LineWidth);
+		break;
+	case 's':
+		vector_S(x,y,size1,color,LineWidth);
+		break;
+	case 't':
+		vector_T(x,y,size1,color,LineWidth);
+		break;
+	case 'u':
+		vector_U(x,y,size1,color,LineWidth);
+		break;
+	case 'v':
+		vector_V(x,y,size1,color,LineWidth);
+		break;
+	case 'w':
+		vector_W(x,y,size1,color,LineWidth);
+		break;
+	case 'x':
+		vector_X(x,y,size1,color,LineWidth);
+		break;
+	case 'y':
+		vector_Y(x,y,size1,color,LineWidth);
+		break;
+	case 'z':
+		vector_Z(x,y,size1,color,LineWidth);
 		break;
 	case ' ':
 
