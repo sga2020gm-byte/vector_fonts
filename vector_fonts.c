@@ -127,7 +127,8 @@ static void vf_drawOval(uint16_t cx, uint16_t cy, uint16_t rx, uint16_t ry,
 }
 
 static uint16_t vf_w(uint16_t size1) {
-	return (uint16_t) ((size1 * 3U) / 5U);
+	/* Возвращаем исходную ширину знакоместа как в старой логике (size1 / 2). */
+	return (uint16_t) (size1 / 2U);
 }
 
 void vector_A(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth) {
