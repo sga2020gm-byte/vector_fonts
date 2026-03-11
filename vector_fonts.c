@@ -386,8 +386,9 @@ void vector_9(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t L
 }
 
 void vector_point(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth) {
+	uint16_t w = vf_w(size1);
 	uint16_t r = size1 / 12 + 1;
-	vf_drawOval(x + vf_w(size1) / 2, y + size1 - r, r, r, color, LineWidth);
+	vf_drawOval(x + w - r - 1, y + size1 - r, r, r, color, LineWidth);
 }
 
 void vector_minus(uint16_t x, uint16_t y, uint16_t size1, uint16_t color, uint16_t LineWidth) {
