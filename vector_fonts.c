@@ -58,27 +58,16 @@ static void vf_drawBezierCubic(vf_point_t p0, vf_point_t p1, vf_point_t p2, vf_p
 
 static void vf_drawLine(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1,
 		uint16_t color, uint16_t lineWidth) {
-	const int32_t dx = (int32_t) x1 - (int32_t) x0;
-	const int32_t dy = (int32_t) y1 - (int32_t) y0;
-	const int32_t dist = (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
-	const int32_t bow = dist / 14 + 1;
-	const int32_t nx = (dy == 0 && dx == 0) ? 0 : ((dy >= 0) ? 1 : -1);
-	const int32_t ny = (dy == 0 && dx == 0) ? 0 : ((dx >= 0) ? -1 : 1);
 	vf_point_t p0 = { x0, y0 };
 	vf_point_t p1;
 	vf_point_t p2 = {
-		((int32_t) x0 + 2 * (int32_t) x1) / 3 + nx * bow,
-		((int32_t) y0 + 2 * (int32_t) y1) / 3 + ny * bow
+		((int32_t) x0 + 2 * (int32_t) x1) / 3,
+		((int32_t) y0 + 2 * (int32_t) y1) / 3
 	};
 	vf_point_t p3 = { x1, y1 };
 
-	if (vfSmoothState.hasPrev && vfSmoothState.lastP3.x == p0.x && vfSmoothState.lastP3.y == p0.y) {
-		p1.x = 2 * p0.x - vfSmoothState.lastC2.x;
-		p1.y = 2 * p0.y - vfSmoothState.lastC2.y;
-	} else {
-		p1.x = (2 * (int32_t) x0 + (int32_t) x1) / 3 + nx * bow;
-		p1.y = (2 * (int32_t) y0 + (int32_t) y1) / 3 + ny * bow;
-	}
+	p1.x = (2 * (int32_t) x0 + (int32_t) x1) / 3;
+	p1.y = (2 * (int32_t) y0 + (int32_t) y1) / 3;
 
 	vf_drawBezierCubic(p0, p1, p2, p3, color, lineWidth);
 	vfSmoothState.lastP3 = p3;
